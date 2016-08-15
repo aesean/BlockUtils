@@ -11,8 +11,8 @@ import android.util.Printer;
  * BlockUtils
  * BlockCanary已经非常好了,主要是BlockCanary是把堆栈信息打印到文件,感觉debug开发时候不是很方便.
  * 所以根据BlockCanary原理写了一个非常轻量的,把卡顿数据打印到LogCat的卡顿检测工具.
- * 原理大致就是:通过{@link Looper#setMessageLogging(Printer)}方法,通过Handler打印消息来监控获取主线程执行持续时间,
- * 然后通过一个HandlerThread线程来打印主线程堆栈信息.
+ * 原理大致就是:通过{@link Looper#setMessageLogging(Printer)}方法,监测Handler打印消息之间间隔的时间,
+ * 来监控获取主线程执行持续时间,然后通过一个HandlerThread子线程来打印主线程堆栈信息.
  *
  * @author xl
  * @version V1.0
@@ -21,15 +21,19 @@ import android.util.Printer;
 public class BlockUtils {
     private static final String TAG = "BlockUtils";
     private static final String HANDLER_THREAD_TAG = "block_handler_thread";
+    /**
+     * 用于分割字符串,LogCat对打印的字符串长度有限制
+     */
+    private static final String LINE_SEPARATOR = "3664113077962208511";
 
     /**
-     * 卡顿,单位毫秒
+     * 卡顿,单位毫秒,这个参数因为子线程也要用所以就static final了,自定义请直接修改这个值.
      */
-    private static final long BLOCK_DELAY_MILLIS = 400;
+    private static final long BLOCK_DELAY_MILLIS = 200;
     /**
      * Dump堆栈数据时间间隔,单位毫秒
      */
-    private static final long DUMP_STACK_DELAY_MILLIS = 100;
+    private static final long DUMP_STACK_DELAY_MILLIS = 50;
     /**
      * 纪录当前Printer回调的状态,注意这里初始状态必须是true.
      */
@@ -67,7 +71,7 @@ public class BlockUtils {
 
     private long mStartTime;
 
-    protected void receiveStartMessage() {
+    private void receiveStartMessage() {
         mStartTime = System.currentTimeMillis();
         // 注意当前类所有代码,除了这个方法里的代码,其他全部是在主线程执行.
         mPrintStaceInfoRunnable = new Runnable() {
@@ -89,35 +93,47 @@ public class BlockUtils {
                 // method2(); 需要300ms
                 // 其实最佳方案是这三个方法全部打印,但从代码层面很难知道是这三个方法时候打印
                 // 这里实际这里是每100ms dump一次主线程堆栈信息,然后又因为线程同步问题,所以可能第一个method0就dump不到
-                mStackInfo.append("\n").append(DUMP_STACK_DELAY_MILLIS * mTimes).append("ms").append("时堆栈状态");
+                mStackInfo.append("\n").append(DUMP_STACK_DELAY_MILLIS * mTimes)
+                        .append("ms").append("时堆栈状态\n").append(LINE_SEPARATOR);
                 for (StackTraceElement stackTraceElement : stackTraceElements) {
                     mStackInfo.append(stackTraceElement.toString()).append("\n");
                 }
+                mStackInfo.append(LINE_SEPARATOR);
                 if (end - mStartMillis > BLOCK_DELAY_MILLIS) {
-                    Log.e(TAG, "\n**************************卡顿时候的堆栈信息**************************");
+                    Log.e(TAG, "**************************堆栈信息**************************");
                     printStackTraceInfo(mStackInfo.toString());
                     mStackInfo.delete(0, mStackInfo.length());
                 }
                 mBlockHandler.postDelayed(this, DUMP_STACK_DELAY_MILLIS);
             }
+
+            private void printStackTraceInfo(String info) {
+                String[] split = info.split(LINE_SEPARATOR);
+                for (String s : split) {
+                    Log.w(TAG, s + "\n");
+                }
+            }
         };
         mBlockHandler.postDelayed(mPrintStaceInfoRunnable, DUMP_STACK_DELAY_MILLIS);
     }
 
-    private static void printStackTraceInfo(String info) {
-        Log.w(TAG, info);
-    }
-
-    protected void receiveFinishMessage() {
+    private void receiveFinishMessage() {
         long end = System.currentTimeMillis();
         long delay = end - mStartTime;
         if (delay >= BLOCK_DELAY_MILLIS) {
-            Log.e(TAG, "兄弟你的App刚卡了:" + delay + "ms\n");
+            Log.e(TAG, "App执行以上方法消耗了:" + delay + "ms\n");
         }
         mBlockHandler.removeCallbacks(mPrintStaceInfoRunnable);
     }
 
     public void start() {
+        if (mBlockThread != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR2) {
+                mBlockThread.quitSafely();
+            } else {
+                mBlockThread.quit();
+            }
+        }
         mBlockThread = new HandlerThread(HANDLER_THREAD_TAG);
         mBlockThread.start();
         mBlockHandler = new Handler(mBlockThread.getLooper());
