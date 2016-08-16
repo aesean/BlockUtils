@@ -15,7 +15,7 @@ import android.util.Printer;
  * 来监控获取主线程执行持续时间,然后通过一个HandlerThread子线程来打印主线程堆栈信息.
  *
  * @author xl
- * @version V1.0
+ * @version V1.1
  * @since 16/8/15
  */
 public class BlockUtils {
@@ -29,11 +29,11 @@ public class BlockUtils {
     /**
      * 卡顿,单位毫秒,这个参数因为子线程也要用所以就static final了,自定义请直接修改这个值.
      */
-    private static final long BLOCK_DELAY_MILLIS = 200;
+    private static final long BLOCK_DELAY_MILLIS = 400;
     /**
      * Dump堆栈数据时间间隔,单位毫秒
      */
-    private static final long DUMP_STACK_DELAY_MILLIS = 50;
+    private static final long DUMP_STACK_DELAY_MILLIS = 100;
     /**
      * 纪录当前Printer回调的状态,注意这里初始状态必须是true.
      */
@@ -67,53 +67,69 @@ public class BlockUtils {
         };
     }
 
-    private Runnable mPrintStaceInfoRunnable;
+    private PrintStaceInfoRunnable mPrintStaceInfoRunnable;
+
+    private class PrintStaceInfoRunnable implements Runnable {
+
+        boolean mNeedStopPostDelayed = false;
+        long mStartMillis = System.currentTimeMillis();
+
+        private StringBuilder mStackInfo = new StringBuilder();
+        private int mTimes = 0;
+
+        public void setNeedStopPostDelayed() {
+            // 这里不需要线程同步,不同步顶多也就打印些堆栈信息
+            mNeedStopPostDelayed = true;
+        }
+
+        @Override
+        public void run() {
+            if (mNeedStopPostDelayed) {
+                return;
+            }
+            // 这里会低概率出现线程安全问题.receiveFinishMessage里removeCallbacks移除this的时候
+            // 跟这里的postDelayed可能有线程同步问题,removeCallbacks先移除了,然后这里的代码已经被执行了,导致this被无限循环post
+            // 如果LogCat出现无限打印就杀死App重新打开,这里是有小概率出现问题.
+            // 线程同步会影响性能,而且也没多大必要,这里就不同步数据了.
+            mBlockHandler.postDelayed(this, DUMP_STACK_DELAY_MILLIS);
+            mTimes++;
+            long end = System.currentTimeMillis();
+            Thread mainThread = Looper.getMainLooper().getThread();
+            StackTraceElement[] stackTraceElements = mainThread.getStackTrace();
+            // 注意这里仅仅是打印当前堆栈信息而已,实际代码不一定就是卡这里了.
+            // 比如此次Handler一共要处理三个方法
+            // method0(); 需要100ms
+            // method1(); 需要200ms
+            // method2(); 需要300ms
+            // 其实最佳方案是这三个方法全部打印,但从代码层面很难知道是这三个方法时候打印
+            // 这里实际这里是每100ms dump一次主线程堆栈信息,然后又因为线程同步问题,所以可能第一个method0就dump不到
+            mStackInfo.append("\n").append(DUMP_STACK_DELAY_MILLIS * mTimes)
+                    .append("ms").append("时堆栈状态\n").append(LINE_SEPARATOR);
+            for (StackTraceElement stackTraceElement : stackTraceElements) {
+                mStackInfo.append(stackTraceElement.toString()).append("\n");
+            }
+            mStackInfo.append(LINE_SEPARATOR);
+            if (end - mStartMillis > BLOCK_DELAY_MILLIS) {
+                Log.e(TAG, "**************************堆栈信息**************************");
+                printStackTraceInfo(mStackInfo.toString());
+                mStackInfo.delete(0, mStackInfo.length());
+            }
+        }
+
+        private void printStackTraceInfo(String info) {
+            String[] split = info.split(LINE_SEPARATOR);
+            for (String s : split) {
+                Log.w(TAG, s + "\n");
+            }
+        }
+    }
 
     private long mStartTime;
 
     private void receiveStartMessage() {
         mStartTime = System.currentTimeMillis();
         // 注意当前类所有代码,除了这个方法里的代码,其他全部是在主线程执行.
-        mPrintStaceInfoRunnable = new Runnable() {
-            long mStartMillis = System.currentTimeMillis();
-
-            private StringBuilder mStackInfo = new StringBuilder();
-            private int mTimes = 0;
-
-            @Override
-            public void run() {
-                mTimes++;
-                long end = System.currentTimeMillis();
-                Thread mainThread = Looper.getMainLooper().getThread();
-                StackTraceElement[] stackTraceElements = mainThread.getStackTrace();
-                // 注意这里仅仅是打印当前堆栈信息而已,实际代码不一定就是卡这里了.
-                // 比如此次Handler一共要处理三个方法
-                // method0(); 需要100ms
-                // method1(); 需要200ms
-                // method2(); 需要300ms
-                // 其实最佳方案是这三个方法全部打印,但从代码层面很难知道是这三个方法时候打印
-                // 这里实际这里是每100ms dump一次主线程堆栈信息,然后又因为线程同步问题,所以可能第一个method0就dump不到
-                mStackInfo.append("\n").append(DUMP_STACK_DELAY_MILLIS * mTimes)
-                        .append("ms").append("时堆栈状态\n").append(LINE_SEPARATOR);
-                for (StackTraceElement stackTraceElement : stackTraceElements) {
-                    mStackInfo.append(stackTraceElement.toString()).append("\n");
-                }
-                mStackInfo.append(LINE_SEPARATOR);
-                if (end - mStartMillis > BLOCK_DELAY_MILLIS) {
-                    Log.e(TAG, "**************************堆栈信息**************************");
-                    printStackTraceInfo(mStackInfo.toString());
-                    mStackInfo.delete(0, mStackInfo.length());
-                }
-                mBlockHandler.postDelayed(this, DUMP_STACK_DELAY_MILLIS);
-            }
-
-            private void printStackTraceInfo(String info) {
-                String[] split = info.split(LINE_SEPARATOR);
-                for (String s : split) {
-                    Log.w(TAG, s + "\n");
-                }
-            }
-        };
+        mPrintStaceInfoRunnable = new PrintStaceInfoRunnable();
         mBlockHandler.postDelayed(mPrintStaceInfoRunnable, DUMP_STACK_DELAY_MILLIS);
     }
 
@@ -123,6 +139,7 @@ public class BlockUtils {
         if (delay >= BLOCK_DELAY_MILLIS) {
             Log.e(TAG, "App执行以上方法消耗了:" + delay + "ms\n");
         }
+        mPrintStaceInfoRunnable.setNeedStopPostDelayed();
         mBlockHandler.removeCallbacks(mPrintStaceInfoRunnable);
     }
 
