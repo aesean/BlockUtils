@@ -27,17 +27,13 @@ public class BlockUtils {
     private static final String LINE_SEPARATOR = "3664113077962208511";
 
     /**
-     * 卡顿,单位毫秒,这个参数因为子线程也要用所以就static final了,自定义请直接修改这个值.
+     * 卡顿,单位毫秒,这个参数因为子线程也要用,为了避免需要线程同步,所以就static final了,自定义请直接修改这个值.
      */
     private static final long BLOCK_DELAY_MILLIS = 400;
     /**
      * Dump堆栈数据时间间隔,单位毫秒
      */
     private static final long DUMP_STACK_DELAY_MILLIS = 100;
-    /**
-     * 纪录当前Printer回调的状态,注意这里初始状态必须是true.
-     */
-    private boolean mPrinterStart = true;
 
     /**
      * 起一个子线程,用来打印主线程的堆栈信息.因为是要监控主线程是否有卡顿的,所以主线程现在是无法打印堆栈的,
@@ -54,6 +50,11 @@ public class BlockUtils {
 
     private Printer createBlockPrinter() {
         return new Printer() {
+            /**
+             * 纪录当前Printer回调的状态,注意这里初始状态必须是true.
+             */
+            private boolean mPrinterStart = true;
+
             @Override
             public void println(String s) {
                 // 这里因为Looper.loop方法内会在Handler开始和结束调用这个方法,所以这里也对应两个状态,start和finish
@@ -78,7 +79,7 @@ public class BlockUtils {
         private int mTimes = 0;
 
         public void setNeedStopPostDelayed() {
-            // 这里不需要线程同步,不同步顶多也就打印些堆栈信息
+            // 这里不需要线程同步,不同步顶多也就多打印些堆栈信息,不会导致无限post
             mNeedStopPostDelayed = true;
         }
 
@@ -173,6 +174,6 @@ public class BlockUtils {
     }
 
     private static class InstanceHolder {
-        private static BlockUtils sInstance = new BlockUtils();
+        private static final BlockUtils sInstance = new BlockUtils();
     }
 }
