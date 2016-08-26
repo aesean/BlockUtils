@@ -36,6 +36,12 @@ public class BlockUtils {
     private static final long DUMP_STACK_DELAY_MILLIS = 100;
 
     /**
+     * 收到一次Handler消息的最大打印次数,30表示收到的本次Handler消息,最多打印前3000ms的堆栈信息,
+     * 防止Handler出现意外无法结束,不会回调receiveFinishMessage,导致无限打印堆栈信息的问题.
+     */
+    private static final int PRINT_MAX_TIMES = 30;
+
+    /**
      * 起一个子线程,用来打印主线程的堆栈信息.因为是要监控主线程是否有卡顿的,所以主线程现在是无法打印堆栈的,
      * 所以需要起一个子线程来打印主线程的堆栈信息.
      */
@@ -88,12 +94,15 @@ public class BlockUtils {
             if (mNeedStopPostDelayed) {
                 return;
             }
+            mTimes++;
+            if (mTimes > PRINT_MAX_TIMES) {
+                return;
+            }
             // 这里会低概率出现线程安全问题.receiveFinishMessage里removeCallbacks移除this的时候
             // 跟这里的postDelayed可能有线程同步问题,removeCallbacks先移除了,然后这里的代码已经被执行了,导致this被无限循环post
             // 如果LogCat出现无限打印就杀死App重新打开,这里是有小概率出现问题.
             // 线程同步会影响性能,而且也没多大必要,这里就不同步数据了.
             mBlockHandler.postDelayed(this, DUMP_STACK_DELAY_MILLIS);
-            mTimes++;
             long end = System.currentTimeMillis();
             Thread mainThread = Looper.getMainLooper().getThread();
             StackTraceElement[] stackTraceElements = mainThread.getStackTrace();
@@ -105,7 +114,7 @@ public class BlockUtils {
             // 其实最佳方案是这三个方法全部打印,但从代码层面很难知道是这三个方法时候打印
             // 这里实际这里是每100ms dump一次主线程堆栈信息,然后又因为线程同步问题,所以可能第一个method0就dump不到
             mStackInfo.append("\n").append(DUMP_STACK_DELAY_MILLIS * mTimes)
-                    .append("ms").append("时堆栈状态\n").append(LINE_SEPARATOR);
+                    .append("ms时堆栈状态\n").append(LINE_SEPARATOR);
             for (StackTraceElement stackTraceElement : stackTraceElements) {
                 mStackInfo.append(stackTraceElement.toString()).append("\n");
             }
@@ -142,6 +151,7 @@ public class BlockUtils {
         }
         mPrintStaceInfoRunnable.setNeedStopPostDelayed();
         mBlockHandler.removeCallbacks(mPrintStaceInfoRunnable);
+        mPrintStaceInfoRunnable = null;
     }
 
     public void start() {
