@@ -12,6 +12,10 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
     }
 
+    public void crash(View view) {
+        throw new RuntimeException("Test for BlockUtils");
+    }
+
     public void block(View view) {
         block(120);
         block(220);
