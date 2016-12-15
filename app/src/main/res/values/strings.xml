@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">BlockUtils</string>
+    <string name="block">Block</string>
+    <string name="crash">Crash</string>
 </resources>

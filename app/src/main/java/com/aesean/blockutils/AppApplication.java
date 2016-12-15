@@ -13,14 +13,6 @@ public class AppApplication extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
-        BlockUtils.getInstance().start();
-        Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
-            @Override
-            public void uncaughtException(Thread t, Throwable e) {
-                e.printStackTrace();
-                BlockUtils.getInstance().sendCrashMessage();
-                android.os.Process.killProcess(android.os.Process.myPid());
-            }
-        });
+        BlockUtils.getInstance().install();
     }
 }
