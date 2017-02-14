@@ -1,4 +1,9 @@
-# BlockUtils
+# BlockUtils(Deprecated)
+项目被转移到
+https://github.com/aesean/ActivityStack
+可以直接参考这里https://github.com/aesean/ActivityStack/blob/master/app/src/main/java/com/aesean/activitystack/utils/BlockUtils.java
+当前项目不再进行更新。
+
 一个帮助监测Android是否卡顿的，超轻量级工具类，主要是方便debug测试。
 
 ##使用方法
